@@ -73,7 +73,7 @@ struct State {
   int W,H,fd;
   struct VidBuffer *buffers;
   unsigned int buffers_count;
-  struct v4l2_buffer*buf;
+  struct v4l2_buffer buf;
 };
 
 void
@@ -81,7 +81,7 @@ VideoInit(State*state)
 {
   state->fd=open("/dev/video0",O_RDWR);
 
-  state->buf=(struct v4l2_buffer*) malloc(sizeof(struct v4l2_buffer));
+  assert(state->fd!=-1);
 
   struct v4l2_format format; 
   memset(&format,0,sizeof(format));
@@ -171,22 +171,22 @@ VideoTakeBuffer(State*state)
   tv.tv_usec=0;
   assert(0<select(state->fd+1,&fds,NULL,NULL,&tv));
  
-  memset(state->buf,0,sizeof(struct v4l2_buffer));
-  state->buf->type=V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  state->buf->memory=V4L2_MEMORY_MMAP;
+  memset(&(state->buf),0,sizeof(struct v4l2_buffer));
+  state->buf.type=V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  state->buf.memory=V4L2_MEMORY_MMAP;
   // http://v4l2spec.bytesex.org/spec/r12878.htm: By default
   // VIDIOC_DQBUF blocks when no buffer is in the outgoing queue
-  assert(-1!=ioctl(state->fd,VIDIOC_DQBUF,state->buf));
+  assert(-1!=ioctl(state->fd,VIDIOC_DQBUF,&(state->buf)));
 
-  assert(state->buf->index<state->buffers_count);
+  assert(state->buf.index<state->buffers_count);
 
-  return (unsigned char*)state->buffers[state->buf->index].start;
+  return (unsigned char*)state->buffers[state->buf.index].start;
 }
 
 void
 VideoReturnBuffer(State*state)
 {
-  assert(-1!=ioctl(state->fd,VIDIOC_QBUF,state->buf));
+  assert(-1!=ioctl(state->fd,VIDIOC_QBUF,&(state->buf)));
 }
 
 void
@@ -198,7 +198,7 @@ VideoClose(State*state)
   for(i=0;i<state->buffers_count;i++)
     munmap(state->buffers[i].start,state->buffers[i].length);
   close(state->fd);
-  free(state->buf);
+  // delete state->buf; BUG this will crash micromanager
 }
 
 
@@ -221,7 +221,7 @@ public:
   ~V4L2()
   {
     Shutdown();
-    free(image);
+    // delete image; BUG this will crash micromanager
   }
 
   // access hardware, create device properties
@@ -258,7 +258,7 @@ public:
     assert(nRet == DEVICE_OK);
     
 
-    image = (unsigned char*) malloc(state->W*state->H);
+    //image = new unsigned char[state->W*state->H];
     VideoInit(state);
     //VideoRunThread(state,image);
 
@@ -271,6 +271,7 @@ public:
   int Shutdown(){
     if(initialized_){
       VideoClose(state);
+      initialized_=0;
     }
     return DEVICE_OK;
   }
@@ -283,6 +284,8 @@ public:
   // blocks until exposure is finished
   int SnapImage()
   {
+    if(!initialized_)
+      return DEVICE_OK;
     unsigned char*data=VideoTakeBuffer(state);
     int i,j;
     for(j=0;j<state->H;j++){
@@ -426,7 +429,7 @@ public:
 private:
   bool initialized_;
   State state[1];
-  unsigned char *image;
+  unsigned char image[gWidth*gHeight];
 };
 
 MODULE_API void InitializeModuleData()
